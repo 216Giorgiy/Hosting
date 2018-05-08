@@ -35,7 +35,7 @@ namespace Microsoft.AspNetCore.Server.IntegrationTesting
                     return new IISExpressDeployer(deploymentParameters, loggerFactory);
                 case ServerType.IIS:
                     throw new NotSupportedException("The IIS deployer is no longer supported");
-                case ServerType.WebListener:
+                case ServerType.HttpSys:
                 case ServerType.Kestrel:
                     return new SelfHostDeployer(deploymentParameters, loggerFactory);
                 case ServerType.Nginx:
