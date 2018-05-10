@@ -153,16 +153,17 @@ namespace Microsoft.AspNetCore.Server.IntegrationTesting
 
             foreach (var server in Servers)
             {
+                string skip = null;
                 if (!ServerIsSupportedOnThisOS(server))
                 {
-                    continue;
+                    skip = "This server is not supported on this operating system.";
                 }
 
                 foreach (var tfm in Tfms)
                 {
-                    if (!TfmIsSupportedOnThisOS(tfm))
+                    if (!TfmIsSupportedOnThisOS(tfm) && skip == null)
                     {
-                        continue;
+                        skip = "This TFM is not supported on this operating system.";
                     }
 
                     foreach (var t in ApplicationTypes)
@@ -185,7 +186,7 @@ namespace Microsoft.AspNetCore.Server.IntegrationTesting
                         {
                             if (server == ServerType.IISExpress)
                             {
-                                CreateIISVariations(data, server, tfm, type, arch);
+                                CreateIISVariations(data, server, tfm, type, arch, skip);
                             }
                             else
                             {
@@ -195,6 +196,7 @@ namespace Microsoft.AspNetCore.Server.IntegrationTesting
                                     Tfm = tfm,
                                     ApplicationType = type,
                                     Architecture = arch,
+                                    Skip = skip,
                                 });
                             }
                         }
@@ -205,7 +207,7 @@ namespace Microsoft.AspNetCore.Server.IntegrationTesting
             return data;
         }
 
-        private void CreateIISVariations(TestList data, ServerType server, string tfm, ApplicationType type, RuntimeArchitecture arch)
+        private void CreateIISVariations(TestList data, ServerType server, string tfm, ApplicationType type, RuntimeArchitecture arch, string skip)
         {
             if (!AncmVersions.Any())
             {
@@ -235,6 +237,7 @@ namespace Microsoft.AspNetCore.Server.IntegrationTesting
                             Architecture = arch,
                             AncmVersion = version,
                             HostingModel = hostingModel,
+                            Skip = skip,
                         });
                     }
                 }

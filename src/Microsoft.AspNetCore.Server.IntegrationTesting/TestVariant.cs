@@ -12,6 +12,8 @@ namespace Microsoft.AspNetCore.Server.IntegrationTesting
         public ApplicationType ApplicationType { get; set; }
         public RuntimeArchitecture Architecture { get; set; }
 
+        public string Skip { get; set; }
+
         // ANCM specifics...
         public HostingModel HostingModel { get; set; }
         public AncmVersion AncmVersion { get; set; }
