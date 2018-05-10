@@ -16,7 +16,7 @@ namespace Microsoft.AspNetCore.Server.IntegrationTesting
     /// <summary>
     /// Abstract base class of all deployers with implementation of some of the common helpers.
     /// </summary>
-    public abstract class ApplicationDeployer : IApplicationDeployer
+    public abstract class ApplicationDeployer : IDisposable
     {
         public static readonly string DotnetCommandName = "dotnet";
 
@@ -41,8 +41,6 @@ namespace Microsoft.AspNetCore.Server.IntegrationTesting
             {
                 throw new ArgumentException($"Invalid ServerType '{DeploymentParameters.ServerType}'.");
             }
-
-            // TODO: Detect TFM?
 
             if (DeploymentParameters.RuntimeFlavor == RuntimeFlavor.None && !string.IsNullOrEmpty(DeploymentParameters.TargetFramework))
             {

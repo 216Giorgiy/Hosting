@@ -17,7 +17,7 @@ namespace Microsoft.AspNetCore.Server.IntegrationTesting
         /// <param name="deploymentParameters"></param>
         /// <param name="loggerFactory"></param>
         /// <returns></returns>
-        public static IApplicationDeployer Create(DeploymentParameters deploymentParameters, ILoggerFactory loggerFactory)
+        public static ApplicationDeployer Create(DeploymentParameters deploymentParameters, ILoggerFactory loggerFactory)
         {
             if (deploymentParameters == null)
             {
