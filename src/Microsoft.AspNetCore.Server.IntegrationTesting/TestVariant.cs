@@ -26,6 +26,7 @@ namespace Microsoft.AspNetCore.Server.IntegrationTesting
 
         public void Serialize(IXunitSerializationInfo info)
         {
+            info.AddValue(nameof(Skip), Skip, typeof(string));
             info.AddValue(nameof(Server), Server, typeof(ServerType));
             info.AddValue(nameof(Tfm), Tfm, typeof(string));
             info.AddValue(nameof(ApplicationType), ApplicationType, typeof(ApplicationType));
@@ -36,6 +37,7 @@ namespace Microsoft.AspNetCore.Server.IntegrationTesting
 
         public void Deserialize(IXunitSerializationInfo info)
         {
+            Skip = info.GetValue<string>(nameof(Skip));
             Server = info.GetValue<ServerType>(nameof(Server));
             Tfm = info.GetValue<string>(nameof(Tfm));
             ApplicationType = info.GetValue<ApplicationType>(nameof(ApplicationType));

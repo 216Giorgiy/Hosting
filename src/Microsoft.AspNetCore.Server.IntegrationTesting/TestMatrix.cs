@@ -2,25 +2,25 @@
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
-using System.Reflection;
 using System.Runtime.InteropServices;
-using System.Runtime.Versioning;
-using Xunit;
 
 namespace Microsoft.AspNetCore.Server.IntegrationTesting
 {
-    public class TestMatrix
+    public class TestMatrix : IEnumerable<object[]>
     {
         public IList<ServerType> Servers { get; set; } = new List<ServerType>();
-        public IList<string> Tfms { get; set; } = new List<string>(); // Can derive from running TFM
-        public IList<ApplicationType> ApplicationTypes { get; set; } = new List<ApplicationType>(); // net461/CLR is always portable, derive from TFM
+        public IList<string> Tfms { get; set; } = new List<string>();
+        public IList<ApplicationType> ApplicationTypes { get; set; } = new List<ApplicationType>();
         public IList<RuntimeArchitecture> Architectures { get; set; } = new List<RuntimeArchitecture>();
 
         // ANCM specific...
         public IList<HostingModel> HostingModels { get; set; } = new List<HostingModel>();
         public IList<AncmVersion> AncmVersions { get; set; } = new List<AncmVersion>();
+
+        private IList<Tuple<Func<TestVariant, bool>, string>> Skips { get; } = new List<Tuple<Func<TestVariant, bool>, string>>();
 
         public static TestMatrix ForServers(params ServerType[] types)
         {
@@ -93,44 +93,52 @@ namespace Microsoft.AspNetCore.Server.IntegrationTesting
         /// <returns></returns>
         public TestMatrix WithAncmV2InProcess() => WithAncmVersions(AncmVersion.AspNetCoreModuleV2).WithHostingModels(HostingModel.InProcess);
 
-        public TestList Build()
+        public TestMatrix Skip(string message, Func<TestVariant, bool> check)
         {
-            var data = new TestList();
+            Skips.Add(new Tuple<Func<TestVariant, bool>, string>(check, message));
+            return this;
+        }
+
+        private IEnumerable<TestVariant> Build()
+        {
             if (!Servers.Any())
             {
-                // Params error, a server is required. This will cause an xunit error.
-                return data;
+                throw new ArgumentException("No servers were specified.");
             }
 
-            // TFMs. If not set then use the one from the current app
+            // TFMs.
             if (!Tfms.Any())
             {
-                var tfmAttribute = Assembly.GetCallingAssembly().GetCustomAttribute<TargetFrameworkAttribute>();
-                if (tfmAttribute != null && !string.IsNullOrEmpty(tfmAttribute.FrameworkName))
-                {
-                    switch (tfmAttribute.FrameworkName)
-                    {
-                        case ".NETFramework,Version=v4.6.1":
-                            Tfms.Add(Tfm.Net461);
-                            break;
-                        case ".NETCoreApp,Version=v2.0":
-                            Tfms.Add(Tfm.NetCoreApp20);
-                            break;
-                        case ".NETCoreApp,Version=v2.1":
-                            Tfms.Add(Tfm.NetCoreApp21);
-                            break;
-                        case ".NETCoreApp,Version=v2.2":
-                            Tfms.Add(Tfm.NetCoreApp22);
-                            break;
-                    }
-                }
-
-                if (!Tfms.Any())
-                {
-                    throw new ArgumentException("No TFMs was provided and one could be detected from the caller, specify a TFM.");
-                }
+                throw new ArgumentException("No TFMs were specified.");
             }
 
+            ResolveDefaultArchitecture();
+
+            if (!ApplicationTypes.Any())
+            {
+                ApplicationTypes.Add(ApplicationType.Portable);
+            }
+
+            if (!AncmVersions.Any())
+            {
+                AncmVersions.Add(AncmVersion.AspNetCoreModule);
+            }
+
+            if (!HostingModels.Any())
+            {
+                HostingModels.Add(HostingModel.OutOfProcess);
+            }
+
+            var variants = new List<TestVariant>();
+            VaryByServer(variants);
+
+            CheckForSkips(variants);
+
+            return variants;
+        }
+
+        private void ResolveDefaultArchitecture()
+        {
             if (!Architectures.Any())
             {
                 switch (RuntimeInformation.OSArchitecture)
@@ -145,124 +153,180 @@ namespace Microsoft.AspNetCore.Server.IntegrationTesting
                         throw new ArgumentException(RuntimeInformation.OSArchitecture.ToString());
                 }
             }
+        }
 
-            if (!ApplicationTypes.Any())
-            {
-                ApplicationTypes.Add(ApplicationType.Portable);
-            }
-
+        private void VaryByServer(List<TestVariant> variants)
+        {
             foreach (var server in Servers)
             {
-                string skip = null;
-                if (!ServerIsSupportedOnThisOS(server))
-                {
-                    skip = "This server is not supported on this operating system.";
-                }
+                var skip = SkipIfServerIsNotSupportedOnThisOS(server);
 
-                foreach (var tfm in Tfms)
-                {
-                    if (!TfmIsSupportedOnThisOS(tfm) && skip == null)
-                    {
-                        skip = "This TFM is not supported on this operating system.";
-                    }
-
-                    foreach (var t in ApplicationTypes)
-                    {
-                        var type = t;
-                        if (Tfm.Matches(Tfm.Net461, tfm) && type == ApplicationType.Portable)
-                        {
-                            if (ApplicationTypes.Count == 1)
-                            {
-                                // Override the default
-                                type = ApplicationType.Standalone;
-                            }
-                            else
-                            {
-                                continue;
-                            }
-                        }
-
-                        foreach (var arch in Architectures)
-                        {
-                            if (server == ServerType.IISExpress)
-                            {
-                                CreateIISVariations(data, server, tfm, type, arch, skip);
-                            }
-                            else
-                            {
-                                data.Add(new TestVariant()
-                                {
-                                    Server = server,
-                                    Tfm = tfm,
-                                    ApplicationType = type,
-                                    Architecture = arch,
-                                    Skip = skip,
-                                });
-                            }
-                        }
-                    }
-                }
-            }
-
-            return data;
-        }
-
-        private void CreateIISVariations(TestList data, ServerType server, string tfm, ApplicationType type, RuntimeArchitecture arch, string skip)
-        {
-            if (!AncmVersions.Any())
-            {
-                AncmVersions.Add(AncmVersion.AspNetCoreModule);
-            }
-
-            if (!HostingModels.Any())
-            {
-                HostingModels.Add(HostingModel.OutOfProcess);
-            }
-
-            foreach (var version in AncmVersions)
-            {
-                foreach (var hostingModel in HostingModels)
-                {
-                    if (Tfm.Matches(Tfm.Net461, tfm) && hostingModel == HostingModel.InProcess)
-                    {
-                        continue;
-                    }
-                    if (version == AncmVersion.AspNetCoreModuleV2 || hostingModel == HostingModel.OutOfProcess)
-                    {
-                        data.Add(new TestVariant()
-                        {
-                            Server = server,
-                            Tfm = tfm,
-                            ApplicationType = type,
-                            Architecture = arch,
-                            AncmVersion = version,
-                            HostingModel = hostingModel,
-                            Skip = skip,
-                        });
-                    }
-                }
+                VaryByTfm(variants, server, skip);
             }
         }
 
-        private static bool TfmIsSupportedOnThisOS(string tfm)
+        private static string SkipIfServerIsNotSupportedOnThisOS(ServerType server)
         {
-            return !(Tfm.Matches(Tfm.Net461, tfm) && !RuntimeInformation.IsOSPlatform(OSPlatform.Windows));
-        }
-
-        private static bool ServerIsSupportedOnThisOS(ServerType server)
-        {
+            var skip = false;
             switch (server)
             {
                 case ServerType.IIS:
                 case ServerType.IISExpress:
                 case ServerType.HttpSys:
-                    return RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
+                    skip = !RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
+                    break;
                 case ServerType.Kestrel:
-                    return true;
+                    break;
                 case ServerType.Nginx:
-                    return !RuntimeInformation.IsOSPlatform(OSPlatform.Windows); // Technically it's possible but we don't test it.
+                    // Technically it's possible but we don't test it.
+                    skip = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
+                    break;
                 default:
                     throw new ArgumentException(server.ToString());
+            }
+
+            return skip ? "This server is not supported on this operating system." : null;
+        }
+
+        private void VaryByTfm(List<TestVariant> variants, ServerType server, string skip)
+        {
+            foreach (var tfm in Tfms)
+            {
+                if (!CheckTfmIsSupportedForServer(tfm, server))
+                {
+                    // Don't generate net461 variations for nginx server.
+                    continue;
+                }
+
+                var skipTfm = skip ?? SkipIfTfmIsNotSupportedOnThisOS(tfm);
+
+                VaryByApplicationType(variants, server, tfm, skipTfm);
+            }
+        }
+
+        private bool CheckTfmIsSupportedForServer(string tfm, ServerType server)
+        {
+            // Not a combination we test
+            return !(Tfm.Matches(Tfm.Net461, tfm) && ServerType.Nginx == server);
+        }
+
+        private static string SkipIfTfmIsNotSupportedOnThisOS(string tfm)
+        {
+            if (Tfm.Matches(Tfm.Net461, tfm) && !RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            {
+                return "This TFM is not supported on this operating system.";
+            }
+
+            return null;
+        }
+
+        private void VaryByApplicationType(List<TestVariant> variants, ServerType server, string tfm, string skip)
+        {
+            foreach (var t in ApplicationTypes)
+            {
+                var type = t;
+                if (Tfm.Matches(Tfm.Net461, tfm) && type == ApplicationType.Portable)
+                {
+                    if (ApplicationTypes.Count == 1)
+                    {
+                        // Override the default
+                        type = ApplicationType.Standalone;
+                    }
+                    else
+                    {
+                        continue;
+                    }
+                }
+
+                VaryByArchitecture(variants, server, tfm, skip, type);
+            }
+        }
+
+        private void VaryByArchitecture(List<TestVariant> variants, ServerType server, string tfm, string skip, ApplicationType type)
+        {
+            foreach (var arch in Architectures)
+            {
+                if (server == ServerType.IISExpress)
+                {
+                    VaryByAncmVersion(variants, server, tfm, type, arch, skip);
+                }
+                else
+                {
+                    variants.Add(new TestVariant()
+                    {
+                        Server = server,
+                        Tfm = tfm,
+                        ApplicationType = type,
+                        Architecture = arch,
+                        Skip = skip,
+                    });
+                }
+            }
+        }
+
+        private void VaryByAncmVersion(IList<TestVariant> variants, ServerType server, string tfm, ApplicationType type, RuntimeArchitecture arch, string skip)
+        {
+            foreach (var version in AncmVersions)
+            {
+                VaryByAncmHostingModel(variants, server, tfm, type, arch, skip, version);
+            }
+        }
+
+        private void VaryByAncmHostingModel(IList<TestVariant> variants, ServerType server, string tfm, ApplicationType type, RuntimeArchitecture arch, string skip, AncmVersion version)
+        {
+            foreach (var hostingModel in HostingModels)
+            {
+                // Not supported
+                if (Tfm.Matches(Tfm.Net461, tfm) && hostingModel == HostingModel.InProcess)
+                {
+                    continue;
+                }
+
+                // No InProc for v1
+                if (version == AncmVersion.AspNetCoreModule && hostingModel == HostingModel.InProcess)
+                {
+                    continue;
+                }
+
+                variants.Add(new TestVariant()
+                {
+                    Server = server,
+                    Tfm = tfm,
+                    ApplicationType = type,
+                    Architecture = arch,
+                    AncmVersion = version,
+                    HostingModel = hostingModel,
+                    Skip = skip,
+                });
+            }
+        }
+
+        private void CheckForSkips(List<TestVariant> variants)
+        {
+            foreach (var variant in variants)
+            {
+                foreach (var skipPair in Skips)
+                {
+                    if (skipPair.Item1(variant))
+                    {
+                        variant.Skip = skipPair.Item2;
+                        break;
+                    }
+                }
+            }
+        }
+
+        IEnumerator IEnumerable.GetEnumerator()
+        {
+            return ((IEnumerable<object[]>)this).GetEnumerator();
+        }
+
+        // This is what Xunit MemberData expects
+        public IEnumerator<object[]> GetEnumerator()
+        {
+            foreach (var v in Build())
+            {
+                yield return new[] { v };
             }
         }
     }
