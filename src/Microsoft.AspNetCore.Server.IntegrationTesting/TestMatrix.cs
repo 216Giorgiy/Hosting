@@ -276,16 +276,19 @@ namespace Microsoft.AspNetCore.Server.IntegrationTesting
         {
             foreach (var hostingModel in HostingModels)
             {
-                // Not supported
-                if (Tfm.Matches(Tfm.Net461, tfm) && hostingModel == HostingModel.InProcess)
+                var skipAncm = skip;
+                if (hostingModel == HostingModel.InProcess)
                 {
-                    continue;
-                }
+                    // Not supported
+                    if (Tfm.Matches(Tfm.Net461, tfm) || version == AncmVersion.AspNetCoreModule)
+                    {
+                        continue;
+                    }
 
-                // No InProc for v1
-                if (version == AncmVersion.AspNetCoreModule && hostingModel == HostingModel.InProcess)
-                {
-                    continue;
+                    if (!IISExpressAncmSchema.SupportsInProcessHosting)
+                    {
+                        skipAncm = skipAncm ?? IISExpressAncmSchema.SkipReason;
+                    }
                 }
 
                 variants.Add(new TestVariant()
@@ -296,7 +299,7 @@ namespace Microsoft.AspNetCore.Server.IntegrationTesting
                     Architecture = arch,
                     AncmVersion = version,
                     HostingModel = hostingModel,
-                    Skip = skip,
+                    Skip = skipAncm,
                 });
             }
         }
